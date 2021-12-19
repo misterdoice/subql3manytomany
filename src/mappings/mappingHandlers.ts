@@ -1,33 +1,52 @@
-import {SubstrateExtrinsic,SubstrateEvent,SubstrateBlock} from "@subql/types";
-import {StarterEntity} from "../types";
-import {Balance} from "@polkadot/types/interfaces";
+import {SubstrateEvent} from "@subql/types";
+import {Proposal, VoteHistory, Councillor} from "../types/models";
+import {bool, int} from "@polkadot/types";
 
 
-export async function handleBlock(block: SubstrateBlock): Promise<void> {
-    //Create a new starterEntity with ID using block hash
-    let record = new StarterEntity(block.block.header.hash.toString());
-    //Record block number
-    record.field1 = block.block.header.number.toNumber();
-    await record.save();
+export async function handleCouncilProposedEvent(event: SubstrateEvent):
+Promise<void> {
+    const {
+        event: {
+            data: [accountId, proposal_index, proposal_hash, threshold],
+        },
+    } = event;
+    const proposal = new Proposal(proposal_hash.toString());
+    proposal.index = proposal_index.toString();
+    proposal.account = accountId.toString();
+    proposal.hash = proposal_hash.toString();
+    proposal.voteThreshold = threshold.toString();
+    proposal.block = event.block.block.header.number.toBigInt();
+    await proposal.save();
 }
 
-export async function handleEvent(event: SubstrateEvent): Promise<void> {
-    const {event: {data: [account, balance]}} = event;
-    //Retrieve the record by its ID
-    const record = await StarterEntity.get(event.extrinsic.block.block.header.hash.toString());
-    record.field2 = account.toString();
-    //Big integer type Balance of a transfer event
-    record.field3 = (balance as Balance).toBigInt();
-    await record.save();
-}
+export async function handleCouncilVotedEvent(event: SubstrateEvent):
+Promise<void> {
+    const {
+        event: {
+            data: [councilorId, proposal_hash, approved_vote, numberYes,
+    numberNo],
+        },
+    } = event;
 
-export async function handleCall(extrinsic: SubstrateExtrinsic): Promise<void> {
-    const record = await StarterEntity.get(extrinsic.block.block.header.hash.toString());
-    //Date type timestamp
-    record.field4 = extrinsic.block.timestamp;
-    //Boolean tyep
-    record.field5 = true;
-    await record.save();
-}
+    await ensureCouncillor(councilorId.toString());
+    const voteHistory = new VoteHistory(
+        `${event.block.block.header.number.toNumber()}-${event.idx}`
+    );
+    voteHistory.proposalHashId = proposal_hash.toString();
+    voteHistory.approvedVote = (approved_vote as bool).valueOf();
+    voteHistory.councillorId = councilorId.toString();
+    voteHistory.votedYes = (numberYes as Int).toNumber();
+    voteHistory.votedNo = (numberNo as Int).toNumber();
+    voteHistory.block = event.block.block.header.number.toNumber();
+    await voteHistory.save();
+    }
 
-
+    async function ensureCouncillor(accountId: string): Promise<void> {
+        let councillor = await Councillor.get(accountId);
+        if (!councillor) {
+            councillor = new Councillor(accountId);
+            councillor.numberOfVotes = 0;
+        }
+        councillor.numberOfVotes += 1;
+        await councillor.save();
+    }
